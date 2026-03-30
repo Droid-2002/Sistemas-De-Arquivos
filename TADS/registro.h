@@ -32,6 +32,20 @@ typedef enum {
     REG_ERRO = -1
 } RegistroStatus;
 
+typedef enum {
+REG_CAMPO_REMOVIDO,
+REG_CAMPO_PROXIMO,
+REG_CAMPO_COD_ESTACAO,
+REG_CAMPO_COD_LINHA,
+REG_CAMPO_COD_PROX_ESTACAO,
+REG_CAMPO_DIST_PROX_ESTACAO,
+REG_CAMPO_COD_LINHA_INTEGRA,
+REG_CAMPO_COD_EST_INTEGRA,
+REG_CAMPO_NOME_ESTACAO,
+REG_CAMPO_NOME_LINHA
+} RegistroCampo;
+
+
 typedef struct {
     char removido;                // '0' ativo, '1' removido
     int proximo;                  // encadeamento da lista de removidos
@@ -169,4 +183,22 @@ void registro_imprimir(const Registro *r);
 */
 long registro_rrn_offset(int rrn);
 
-#endif
+/*
+*   RegistroStatus registro_set_char(Registro *r, RegistroCampo campo, char valor);
+*   RegistroStatus registro_set_int(Registro *r, RegistroCampo campo, int valor);
+*   RegistroStatus registro_set_str(Registro *r, RegistroCampo campo, const char *valor);
+*   Define o valor de um campo específico em um registro.
+*   Args:
+*       r: ponteiro para o registro onde o campo deve ser definido
+*       campo: enumeração indicando qual campo do registro deve ser definido
+*       valor: valor a ser atribuído ao campo (char para campos de caractere, int para campos inteiros, const char* para campos de string)
+*   Retorna:
+*       REG_OK (1) se o campo foi definido com sucesso
+*       REG_ERRO (-1) se ocorreu um erro durante a definição do campo
+*/
+RegistroStatus registro_set_char(Registro *r, RegistroCampo campo, char valor);
+RegistroStatus registro_set_int(Registro *r, RegistroCampo campo, int valor);
+RegistroStatus registro_set_str(Registro *r, RegistroCampo campo, const char *valor);
+
+
+#endif // REGISTRO_H
