@@ -11,9 +11,9 @@
 #define CAMPO_VAZIO ""
 
 typedef enum {
-    PARSER_OK = 1,
-    PARSER_EOF = 0,
-    PARSER_ERRO = -1
+    CSV_OK = 1,
+    CSV_EOF = 0,
+    CSV_ERRO = -1
 } CsvStatus;
 
 typedef struct {
