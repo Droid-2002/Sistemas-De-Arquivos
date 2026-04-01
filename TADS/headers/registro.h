@@ -26,13 +26,18 @@
 
 #define BYTES_BASE_LIXO (TAM_REGISTRO - BYTES_FIXOS_REGISTRO)
 
-typedef enum {
+/*
+    REG_OK = 1,
+    REG_EOF = 0,
+    REG_ERRO = -1
+*/
+typedef enum  registro_status{
     REG_OK = 1,
     REG_EOF = 0,
     REG_ERRO = -1
 } RegistroStatus;
 
-typedef enum {
+typedef enum registro_campo {
 REG_CAMPO_REMOVIDO,
 REG_CAMPO_PROXIMO,
 REG_CAMPO_COD_ESTACAO,
@@ -60,24 +65,23 @@ typedef struct {
     int tamNomeEstacao;           // >= 1
     char *nomeEstacao; 
 
-    int tamNomeLinha;             // 0 = nulo
-    char *nomeLinha;     
+    int tamNomeLinha;             // 0 = nulo/vazio, >= 1 = tamanho da string
+    char *nomeLinha;              // nome vazio = nulo
 } Registro;
 
 
 // Métodos do Registro
 
 /*
-*   void registro_start(Registro *r);
+*   Registro registro_start(void);
 *   Inicializa os campos de um registro,
 *   
 *   Args:
-*       r: ponteiro para o registro a ser inicializado
+*       none
 *   Retorna:
-*       Nenhum valor retornado
-*       Uso de ponteiros
+*       Retornna um registro com os campos padrões
 */
-void registro_start(Registro *r);
+Registro registro_start(void);
 
 /*
 *   void registro_free(Registro *r);
@@ -102,25 +106,27 @@ void registro_free(Registro *r);
 *   Args:
 *       r: ponteiro para o registro onde o nome da estação deve ser definido
 *       nome: string contendo o nome da estação a ser definida
+*       tam_nome: tamanho da string sem contar o caractere nulo
 *   Retorna:
 *       REG_OK (1) se o nome foi definido com sucesso
 *       REG_ERRO (-1) se ocorreu um erro durante a definição do nome (ex: falha na alocação de memória)
 */
-int registro_set_nome_estacao(Registro *r, const char *nome);
+RegistroStatus registro_set_nome_estacao(Registro *r, const char *nome, int tam_nome);
 
 /*
 
-*   RegistroStatus registro_set_nome_linha(Registro *r, const char *nome);
+*   RegistroStatus registro_set_nome_linha(Registro *r, const char *nome, int tam_nome);
 *   Define o nome da linha em um registro, alocando memória para armazenar
 *   a string e copiando o conteúdo do nome fornecido.
 *   Args:
 *       r: ponteiro para o registro onde o nome da linha deve ser definido
 *       nome: string contendo o nome da linha a ser definida
+        tam_nome: tamanho da string sem contar o caractere nulo
 *   Retorna:
 *       REG_OK (1) se o nome foi definido com sucesso
 *       REG_ERRO (-1) se ocorreu um erro durante a definição do nome (ex: falha na alocação de memória)
 */
-RegistroStatus registro_set_nome_linha(Registro *r, const char *nome); /* nome vazio => nulo */
+RegistroStatus registro_set_nome_linha(Registro *r, const char *nome, int tam_nome);
 
 /*
 *   int registro_bytes_lixo(const Registro *r);
