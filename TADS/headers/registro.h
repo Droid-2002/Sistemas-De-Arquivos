@@ -3,29 +3,6 @@
 
 #include <stdio.h>
 
-
-// Definições de tamanhos e constantes para o registro
-#define TAM_REGISTRO 80
-
-#define TAM_REMOVIDO            1
-#define TAM_PROXIMO             4
-#define TAM_COD_ESTACAO         4
-#define TAM_COD_LINHA           4
-#define TAM_COD_PROX_ESTACAO    4
-#define TAM_DIST_PROX_ESTACAO   4
-#define TAM_COD_LINHA_INTEGRA   4
-#define TAM_COD_EST_INTEGRA     4
-#define TAM_INDICE_NOME_ESTACAO 4
-#define TAM_INDICE_NOME_LINHA   4
-
-#define BYTES_FIXOS_REGISTRO ( \
-    TAM_REMOVIDO + TAM_PROXIMO + TAM_COD_ESTACAO + TAM_COD_LINHA + \
-    TAM_COD_PROX_ESTACAO + TAM_DIST_PROX_ESTACAO + TAM_COD_LINHA_INTEGRA + \
-    TAM_COD_EST_INTEGRA + TAM_INDICE_NOME_ESTACAO + TAM_INDICE_NOME_LINHA \
-)
-
-#define BYTES_BASE_LIXO (TAM_REGISTRO - BYTES_FIXOS_REGISTRO)
-
 /*
     REG_OK = 1,
     REG_EOF = 0,

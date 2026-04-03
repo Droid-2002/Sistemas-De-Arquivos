@@ -21,6 +21,8 @@ typedef struct {
     Head head;
     ArqModo modo; // 0 leitura e 1 escrita/atualização
     int rrn_atual; // RRN do registro atualmente lido ou escrito
+    int num_registros; // número total de registros (incluindo removidos)
+    Registro *registros; // array de registros
 } Arquivo;
 
 /*
@@ -136,5 +138,10 @@ ArqStatus arquivo_append_registro(Arquivo *arq, const Registro *r);
  */
 ArqStatus arquivo_ler_rrn(Arquivo *arq, int rrn, Registro *r);
 
+/*
+* ArqStatus arquivo_escrever(Arquivo *arq, FILE *fp);
+* Escreve o cabeçalho e os registros no arquivo binário
+*/
+ArqStatus arquivo_escrever(Arquivo *arq, FILE *fp);
 
 #endif // ARQUIVE_H
