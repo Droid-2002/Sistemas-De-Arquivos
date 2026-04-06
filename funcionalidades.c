@@ -267,14 +267,28 @@ void func_select_where(const char *arquivo_bin, int n) {
 
     /* --- executar cada uma das n buscas --- */
     for (int q = 0; q < n; q++) {
+        /* linha em branco separando as consultas */
+        if (q > 0) printf("\n");
+
         int m; /* número de critérios desta busca */
         scanf("%d", &m);
 
         /* ler os m pares (campo, valor) */
         for (int i = 0; i < m; i++) {
             scanf("%s", campos[i]);
-            /* ScanQuoteString lida com aspas, NULO e valores simples */
-            ScanQuoteString(valores[i]);
+
+            /* ScanQuoteString so funciona bem pra strings entre aspas e NULO.
+               pra campos inteiros ela acaba consumindo o proximo token da entrada
+               (por causa do getchar + scanf interno), entao usamos scanf direto */
+            if (strcmp(campos[i], "nomeEstacao") == 0 || strcmp(campos[i], "nomeLinha") == 0) {
+                ScanQuoteString(valores[i]);
+            } else {
+                scanf("%s", valores[i]);
+                /* scanf le "NULO" literalmente, converter pra "" que eh
+                   o que registro_match espera pra indicar campo nulo */
+                if (strcmp(valores[i], "NULO") == 0)
+                    valores[i][0] = '\0';
+            }
         }
 
         /* busca sequencial: posicionar logo após o cabeçalho */
