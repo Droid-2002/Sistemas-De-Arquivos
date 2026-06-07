@@ -291,6 +291,16 @@ void func_select_where(const char *arquivo_bin, int n) {
             }
         }
 
+        /* codEstacao é o id (chave única): se for um dos critérios,
+           podemos parar a busca assim que o registro for encontrado */
+        int busca_por_id = 0;
+        for (int i = 0; i < m; i++) {
+            if (strcmp(campos[i], "codEstacao") == 0) {
+                busca_por_id = 1;
+                break;
+            }
+        }
+
         /* busca sequencial: posicionar logo após o cabeçalho */
         fseek(fp, TAM_CABECALHO, SEEK_SET);
 
@@ -319,6 +329,12 @@ void func_select_where(const char *arquivo_bin, int n) {
             }
 
             registro_free(&r);
+
+            /* busca por id: como codEstacao é único, para de percorrer
+               o arquivo assim que o registro é encontrado */
+            if (satisfaz && busca_por_id) {
+                break;
+            }
         }
 
         if (!encontrou) {
