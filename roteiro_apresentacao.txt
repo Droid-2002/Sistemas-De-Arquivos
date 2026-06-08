@@ -1,0 +1,326 @@
+================================================================================
+        ROTEIRO DE APRESENTACAO - TRABALHO PRATICO 1
+        SCC0503 - Algoritmos e Estruturas de Dados II
+        Sistema de Arquivos Binarios - Metro/CPTM
+================================================================================
+
+
+================================================================================
+PARTE 1 - ALUNO 1
+Estrutura do projeto, TADs de base (Head, Registro, CSV) e Funcionalidade 1
+================================================================================
+
+
+1.1 VISAO GERAL DO PROJETO
+--------------------------------------------------------------------------------
+
+O programa trabalha com dados de estacoes de metro e CPTM de Sao Paulo.
+Ele recebe um CSV com informacoes das estacoes (codigo, nome, linha, distancias,
+integracoes) e converte tudo pra um arquivo binario de registros fixos de 80
+bytes. Depois consegue fazer consultas sobre esse binario.
+
+Arquivos do projeto:
+  - main.c              -> ponto de entrada, le a funcionalidade e despacha
+  - funcionalidades.c/h -> implementa as 4 operacoes principais
+  - head.c/h            -> TAD do cabecalho do arquivo binario (17 bytes)
+  - registro.c/h        -> TAD do registro de dados (80 bytes fixos)
+  - csv.c/h             -> TAD pra fazer o parsing do CSV
+  - utils.h             -> declara BinarioNaTela e ScanQuoteString
+  - fornecidas.c        -> implementacao das funcoes fornecidas pela disciplina
+
+Compilacao: gcc -o programaTrab *.c
+
+O main.c eh bem simples: le um inteiro da entrada (1, 2, 3 ou 4) e chama a
+funcao correspondente. Usa um switch/case direto, sem complicacao.
+
+
+1.2 TAD CABECALHO (head.h / head.c)
+--------------------------------------------------------------------------------
+
+O cabecalho ocupa os primeiros 17 bytes do arquivo binario.
+
+Layout em disco:
+  Byte 0      -> status (1 byte, char): '0' = inconsistente, '1' = consistente
+  Bytes 1-4   -> topo (4 bytes, int): RRN do primeiro registro removido
+  Bytes 5-8   -> proxRRN (4 bytes, int): proximo RRN disponivel pra insercao
+  Bytes 9-12  -> nroEstacoes (4 bytes, int): qtd de estacoes distintas (por nome)
+  Bytes 13-16 -> nroParesEstacao (4 bytes, int): qtd de pares (cod, codProx) distintos
+
+A struct Head em memoria tem esses mesmos 5 campos.
+
+Funcoes principais:
+  - head_start(): inicializa com status='0', topo=-1, demais=0
+  - head_escrever(): faz fseek pro byte 0 e grava campo a campo com fwrite
+  - head_ler(): faz fseek pro byte 0 e le campo a campo com fread
+
+Detalhe importante: a gente NUNCA grava a struct inteira com um fwrite so.
+Sempre campo a campo, pra evitar problemas de padding que o compilador pode
+colocar entre os campos da struct.
+
+O campo status funciona como controle de integridade:
+  - Antes de comecar a escrever, marca status='0' (inconsistente)
+  - So quando termina tudo certinho, marca status='1' (consistente)
+  - Na leitura, se status=='0', recusa abrir o arquivo
+
+
+1.3 TAD REGISTRO (registro.h / registro.c)
+--------------------------------------------------------------------------------
+
+Cada registro ocupa exatamente 80 bytes no arquivo. A struct Registro tem:
+
+Campos fixos (37 bytes no total):
+  - removido (1 byte, char): '0' ativo, '1' removido logicamente
+  - proximo (4 bytes, int): encadeamento da lista de removidos
+  - codEstacao (4 bytes, int): codigo da estacao (nunca nulo)
+  - codLinha (4 bytes, int): codigo da linha (-1 se nulo)
+  - codProxEstacao (4 bytes, int): cod da proxima estacao (-1 se nulo)
+  - distProxEstacao (4 bytes, int): distancia em metros (-1 se nulo)
+  - codLinhaIntegra (4 bytes, int): cod da linha de integracao (-1 se nulo)
+  - codEstIntegra (4 bytes, int): cod da estacao de integracao (-1 se nulo)
+  - tamNomeEstacao (4 bytes, int): tamanho do nome da estacao
+  - tamNomeLinha (4 bytes, int): tamanho do nome da linha
+
+Campos variaveis (ate 43 bytes):
+  - nomeEstacao (tamNomeEstacao bytes): gravado SEM '\0'
+  - nomeLinha (tamNomeLinha bytes): gravado SEM '\0'
+  - lixo: o restante eh preenchido com '$' pra completar 80 bytes
+
+Formula do lixo: bytes_lixo = 80 - 37 - tamNomeEstacao - tamNomeLinha
+
+Funcoes principais:
+  - registro_start(): inicializa tudo com valores padrao (ints = -1, strings = NULL)
+  - registro_free(): libera a memoria alocada pras strings
+  - registro_set_nome_estacao/nome_linha(): aloca copia interna da string
+  - registro_escrever_bin(): grava campo a campo, depois preenche com '$'
+  - registro_ler_bin(): le campo a campo; se removido=='1', pula o resto com fseek
+  - registro_bytes_lixo(): calcula quantos '$' precisa
+  - registro_rrn_offset(): calcula offset = 17 + RRN * 80
+
+Na escrita, as strings vao pro disco SEM o '\0' terminal. Quem controla o
+tamanho eh o campo tamNomeEstacao/tamNomeLinha que vem antes.
+
+Na leitura, ao encontrar registro removido, ele le so o campo 'proximo' (pra
+manter a lista de removidos) e pula os 75 bytes restantes com fseek, sem
+alocar memoria desnecessaria.
+
+
+1.4 TAD CSV (csv.h / csv.c)
+--------------------------------------------------------------------------------
+
+Responsavel por ler o arquivo CSV de entrada e converter cada linha num Registro.
+
+A struct Csv eh simples: so um FILE* e um contador de linha.
+
+Funcoes:
+  - csv_abrir(): abre o arquivo pra leitura
+  - csv_pular_cabecalho(): descarta a primeira linha (nomes das colunas)
+  - csv_ler_registro(): le uma linha, divide nos 8 campos, preenche o Registro
+  - csv_fechar(): fecha o arquivo
+
+O parsing usa uma funcao auxiliar split_csv() que percorre a linha substituindo
+cada virgula por '\0', guardando ponteiros pro inicio de cada campo. Assim
+campos vazios (duas virgulas seguidas, tipo ",,") ficam como string vazia e
+sao tratados como nulo.
+
+Ordem dos campos no CSV:
+  [0] codEstacao, [1] nomeEstacao, [2] codLinha, [3] nomeLinha,
+  [4] codProxEstacao, [5] distProxEstacao, [6] codLinhaIntegra, [7] codEstIntegra
+
+Campos inteiros vazios viram -1 (pela funcao campo_para_int).
+Campos string vazios ficam com tamNome=0 e ponteiro NULL.
+
+
+1.5 FUNCIONALIDADE 1 - CREATE TABLE (CSV -> Binario)
+--------------------------------------------------------------------------------
+
+Arquivo: funcionalidades.c -> func_criar_tabela()
+
+Entrada: nome do CSV e nome do arquivo binario a ser criado
+Exemplo: 1 estacoes.csv estacoes.bin
+
+Passo a passo:
+  1) Abre o CSV e pula o cabecalho
+  2) Cria o arquivo binario com fopen("wb")
+  3) Escreve o cabecalho inicial com status='0' (inconsistente)
+  4) Pra cada linha do CSV:
+     - Le a linha e converte pra um Registro (via csv_ler_registro)
+     - Grava o registro no binario (via registro_escrever_bin)
+     - Incrementa proxRRN
+     - Conta estacoes distintas (por nomeEstacao) usando uma ListaNomes
+     - Conta pares (codEstacao, codProxEstacao) distintos usando uma ListaPares
+  5) Atualiza o cabecalho: status='1', proxRRN, nroEstacoes, nroParesEstacao
+  6) Fecha o arquivo
+  7) Chama BinarioNaTela() pra exibir o checksum
+
+As estruturas ListaNomes e ListaPares sao listas dinamicas com busca linear
+pra verificar duplicatas. Sao usadas so aqui dentro, por isso sao static.
+
+A contagem de pares so considera pares onde codProxEstacao != -1 (ou seja,
+ignora estacoes terminais que nao tem proxima estacao).
+
+
+================================================================================
+PARTE 2 - ALUNO 2
+Funcionalidades 2, 3 e 4 (consultas sobre o arquivo binario)
+================================================================================
+
+
+2.1 FUNCIONALIDADE 2 - SELECT * (Listar todos)
+--------------------------------------------------------------------------------
+
+Arquivo: funcionalidades.c -> func_select_todos()
+
+Entrada: nome do arquivo binario
+Exemplo: 2 estacoes.bin
+
+Passo a passo:
+  1) Abre o arquivo em modo leitura ("rb")
+  2) Le o cabecalho e verifica se status=='1' (consistente)
+     Se nao, imprime "Falha no processamento do arquivo."
+  3) Percorre todos os registros sequencialmente apos o cabecalho
+  4) Pra cada registro lido:
+     - Se removido=='0' (ativo), chama registro_imprimir()
+     - Se removido=='1', so pula (registro_ler_bin ja cuida disso)
+  5) Se nenhum registro ativo foi encontrado, imprime "Registro inexistente."
+  6) Fecha o arquivo
+
+A funcao registro_imprimir() exibe no formato:
+  codEstacao nomeEstacao codLinha nomeLinha codProxEstacao distProxEstacao codLinhaIntegra codEstIntegra
+
+Campos inteiros com valor -1 sao exibidos como "NULO".
+Campos string NULL tambem aparecem como "NULO".
+
+Exemplo de saida:
+  9 Luz 1 Azul 10 762 4 55
+  23 Jabaquara 1 Azul NULO NULO NULO NULO
+
+
+2.2 FUNCIONALIDADE 3 - SELECT WHERE (Busca por criterios)
+--------------------------------------------------------------------------------
+
+Arquivo: funcionalidades.c -> func_select_where()
+
+Entrada: nome do arquivo binario e numero de consultas
+Exemplo: 3 estacoes.bin 4
+
+Pra cada consulta, le da entrada:
+  m campo1 valor1 campo2 valor2 ...
+onde m eh o numero de criterios.
+
+Exemplos de consulta:
+  1 distProxEstacao 2000
+  2 nomeLinha "Prata" codLinhaIntegra 2
+  2 nomeLinha "Azul" codEstIntegra NULO
+
+Passo a passo:
+  1) Abre o arquivo e valida o cabecalho (mesma verificacao da func 2)
+  2) Pra cada uma das n consultas:
+     a) Le m (qtd de criterios)
+     b) Le os m pares (campo, valor)
+        - Pra campos string (nomeEstacao, nomeLinha): usa ScanQuoteString
+          que trata aspas duplas e a palavra NULO
+        - Pra campos inteiros: usa scanf normal
+          Se o valor lido for "NULO", converte pra string vazia ""
+     c) Faz fseek pro byte 17 (logo apos o cabecalho)
+     d) Percorre todos os registros sequencialmente
+     e) Pra cada registro ativo, verifica se satisfaz TODOS os criterios
+        usando a funcao registro_match()
+     f) Imprime os que satisfazem
+     g) Se nenhum satisfez, imprime "Registro inexistente."
+     h) Entre consultas, imprime uma linha em branco
+
+A funcao registro_match() recebe o nome do campo e o valor como string:
+  - Identifica qual campo eh pelo nome (strcmp com "codLinha", "nomeEstacao", etc)
+  - Se o valor eh "" (vazio), significa busca por NULO
+  - Pra inteiros: converte o valor com atoi e compara
+  - Pra strings: compara com strcmp
+
+Detalhe da leitura de entrada: ScanQuoteString faz um getchar() interno pra
+pegar o primeiro caractere. Se o valor for um inteiro simples (tipo "2"),
+ela consome o caractere e depois faz scanf("%s") que pode pegar tokens da
+proxima linha. Por isso campos inteiros sao lidos com scanf direto.
+
+
+2.3 FUNCIONALIDADE 4 - SELECT POR RRN (Acesso direto)
+--------------------------------------------------------------------------------
+
+Arquivo: funcionalidades.c -> func_select_rrn()
+
+Entrada: nome do arquivo binario e o RRN desejado
+Exemplo: 4 estacoes.bin 83
+
+Passo a passo:
+  1) Abre o arquivo e valida o cabecalho
+  2) Verifica se o RRN eh valido: 0 <= rrn < proxRRN
+     Se nao, imprime "Registro inexistente."
+  3) Calcula o offset: 17 + RRN * 80 (via registro_rrn_offset)
+  4) Faz fseek pra esse offset
+  5) Le o registro com registro_ler_bin
+  6) Se o registro esta removido ou deu erro, imprime "Registro inexistente."
+     Senao, imprime o registro
+
+Essa eh a funcionalidade mais rapida porque vai direto no registro pelo RRN,
+sem precisar percorrer todos. O RRN 0 eh o primeiro registro (logo apos o
+cabecalho de 17 bytes), o RRN 1 comeca no byte 97, e assim por diante.
+
+
+2.4 TRATAMENTO DE ERROS E INTEGRIDADE
+--------------------------------------------------------------------------------
+
+Todas as funcionalidades seguem o mesmo padrao de tratamento de erros:
+  - Se nao consegue abrir o arquivo: "Falha no processamento do arquivo."
+  - Se o cabecalho tem status='0': "Falha no processamento do arquivo."
+  - Se nenhum registro encontrado: "Registro inexistente."
+
+O campo status do cabecalho eh o mecanismo de integridade:
+  - Na escrita (func 1): comeca com '0', so vira '1' quando termina tudo
+  - Na leitura (funcs 2,3,4): se encontrar '0', recusa abrir
+
+Toda memoria alocada dinamicamente (strings dos registros, listas auxiliares)
+eh liberada corretamente com free() pra evitar vazamentos.
+
+Os registros removidos logicamente (removido=='1') sao ignorados nas buscas.
+O campo 'proximo' deles forma uma lista encadeada apontada pelo 'topo' do
+cabecalho, pensando em reaproveitamento futuro de espaco.
+
+
+2.5 FORMATO DO ARQUIVO BINARIO - RESUMO VISUAL
+--------------------------------------------------------------------------------
+
+  +-------------------+  Byte 0
+  |    CABECALHO      |
+  |    (17 bytes)     |
+  |  status(1)        |
+  |  topo(4)          |
+  |  proxRRN(4)       |
+  |  nroEstacoes(4)   |
+  |  nroParesEst(4)   |
+  +-------------------+  Byte 17
+  |   REGISTRO 0      |
+  |   (80 bytes)      |
+  |  removido(1)      |
+  |  proximo(4)       |
+  |  codEstacao(4)    |
+  |  codLinha(4)      |
+  |  codProxEst(4)    |
+  |  distProxEst(4)   |
+  |  codLinhaInt(4)   |
+  |  codEstInt(4)     |
+  |  tamNomeEst(4)    |
+  |  nomeEstacao(var)  |
+  |  tamNomeLin(4)    |
+  |  nomeLinha(var)    |
+  |  lixo '$'(var)    |
+  +-------------------+  Byte 97
+  |   REGISTRO 1      |
+  |   (80 bytes)      |
+  +-------------------+  Byte 177
+  |       ...         |
+  +-------------------+
+
+Offset do registro RRN: 17 + RRN * 80
+
+
+================================================================================
+FIM DO ROTEIRO
+================================================================================
