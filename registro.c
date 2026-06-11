@@ -373,6 +373,19 @@ void registro_imprimir(const Registro *r) {
  * ----------------------------------------------------------------------- */
 
 /*
+ * Normaliza pequenas variações de nome de campo que aparecem na entrada
+ * (ex: "codLinhaIntegrada", "codEstacaoIntegra") para a forma canônica
+ * usada internamente. Retorna o próprio nome se não houver variação conhecida.
+ */
+static const char *campo_canonico(const char *campo) {
+    if (strcmp(campo, "codLinhaIntegrada") == 0) return "codLinhaIntegra";
+    if (strcmp(campo, "codEstacaoIntegra")  == 0 ||
+        strcmp(campo, "codEstacaoIntegrada") == 0 ||
+        strcmp(campo, "codEstIntegrada")     == 0) return "codEstIntegra";
+    return campo;
+}
+
+/*
  * Verifica se o registro satisfaz um critério de busca.
  * campo: nome do campo (ex: "codLinha", "nomeEstacao")
  * valor: valor esperado; "" indica busca por NULO
@@ -381,6 +394,8 @@ void registro_imprimir(const Registro *r) {
  */
 int registro_match(const Registro *r, const char *campo, const char *valor) {
     if (r == NULL || campo == NULL || valor == NULL) return 0;
+
+    campo = campo_canonico(campo);
 
     /* indica busca por NULO: string vazia retornada por ScanQuoteString */
     int busca_nulo = (valor[0] == '\0');
@@ -425,4 +440,38 @@ int registro_match(const Registro *r, const char *campo, const char *valor) {
     }
 
     return 0; /* campo não reconhecido */
+}
+
+/* -----------------------------------------------------------------------
+ * Setter por nome de campo (cláusula SET da funcionalidade [9])
+ * ----------------------------------------------------------------------- */
+
+RegistroStatus registro_set_por_nome(Registro *r, const char *campo, const char *valor) {
+    if (r == NULL || campo == NULL || valor == NULL) return REG_ERRO;
+
+    campo = campo_canonico(campo);
+
+    /* valor "" (NULO) => inteiros viram -1, strings viram NULL */
+    int eh_nulo = (valor[0] == '\0');
+
+    /* codEstacao nunca é nulo */
+    if (strcmp(campo, "codEstacao") == 0)
+        return registro_set_int(r, REG_CAMPO_COD_ESTACAO, atoi(valor));
+    if (strcmp(campo, "codLinha") == 0)
+        return registro_set_int(r, REG_CAMPO_COD_LINHA, eh_nulo ? -1 : atoi(valor));
+    if (strcmp(campo, "codProxEstacao") == 0)
+        return registro_set_int(r, REG_CAMPO_COD_PROX_ESTACAO, eh_nulo ? -1 : atoi(valor));
+    if (strcmp(campo, "distProxEstacao") == 0)
+        return registro_set_int(r, REG_CAMPO_DIST_PROX_ESTACAO, eh_nulo ? -1 : atoi(valor));
+    if (strcmp(campo, "codLinhaIntegra") == 0)
+        return registro_set_int(r, REG_CAMPO_COD_LINHA_INTEGRA, eh_nulo ? -1 : atoi(valor));
+    if (strcmp(campo, "codEstIntegra") == 0)
+        return registro_set_int(r, REG_CAMPO_COD_EST_INTEGRA, eh_nulo ? -1 : atoi(valor));
+
+    if (strcmp(campo, "nomeEstacao") == 0)
+        return registro_set_str(r, REG_CAMPO_NOME_ESTACAO, eh_nulo ? NULL : valor);
+    if (strcmp(campo, "nomeLinha") == 0)
+        return registro_set_str(r, REG_CAMPO_NOME_LINHA, eh_nulo ? NULL : valor);
+
+    return REG_ERRO; /* campo não reconhecido */
 }

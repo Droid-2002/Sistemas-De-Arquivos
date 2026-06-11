@@ -12,10 +12,15 @@
  * depois os argumentos necessários, e despacha para a função correta.
  *
  * Funcionalidades:
- *   1 arquivo.csv arquivo.bin   → CREATE TABLE (CSV → binário)
- *   2 arquivo.bin               → SELECT * (listar todos)
- *   3 arquivo.bin n             → SELECT WHERE (busca por campo, n consultas)
- *   4 arquivo.bin RRN           → SELECT por RRN (acesso direto)
+ *   1 arquivo.csv arquivo.bin       → CREATE TABLE (CSV → binário)
+ *   2 arquivo.bin                   → SELECT * (listar todos)
+ *   3 arquivo.bin n                 → SELECT WHERE (busca por campo, n consultas)
+ *   4 arquivo.bin RRN               → SELECT por RRN (acesso direto)
+ *   5 dados.bin indice.bin          → criar arquivo de índice primário
+ *   6 dados.bin indice.bin n        → SELECT WHERE com índice (busca indexada/sequencial)
+ *   7 dados.bin indice.bin n        → DELETE (remoção lógica, n remoções)
+ *   8 dados.bin indice.bin n        → INSERT (n inserções)
+ *   9 dados.bin indice.bin n        → UPDATE (n atualizações)
  */
 
 #include <stdio.h>
@@ -33,6 +38,7 @@ int main(void) {
 
     char arquivo_csv[512];
     char arquivo_bin[512];
+    char arquivo_indice[512];
     int  rrn;
     int  n;
 
@@ -60,6 +66,36 @@ int main(void) {
         case 4:
             scanf("%s %d", arquivo_bin, &rrn);
             func_select_rrn(arquivo_bin, rrn);
+            break;
+
+        /* --- Funcionalidade 5: criar índice primário --- */
+        case 5:
+            scanf("%s %s", arquivo_bin, arquivo_indice);
+            func_criar_indice(arquivo_bin, arquivo_indice);
+            break;
+
+        /* --- Funcionalidade 6: SELECT WHERE com índice (n consultas) --- */
+        case 6:
+            scanf("%s %s %d", arquivo_bin, arquivo_indice, &n);
+            func_select_where_indexado(arquivo_bin, arquivo_indice, n);
+            break;
+
+        /* --- Funcionalidade 7: DELETE (n remoções) --- */
+        case 7:
+            scanf("%s %s %d", arquivo_bin, arquivo_indice, &n);
+            func_remover(arquivo_bin, arquivo_indice, n);
+            break;
+
+        /* --- Funcionalidade 8: INSERT (n inserções) --- */
+        case 8:
+            scanf("%s %s %d", arquivo_bin, arquivo_indice, &n);
+            func_inserir(arquivo_bin, arquivo_indice, n);
+            break;
+
+        /* --- Funcionalidade 9: UPDATE (n atualizações) --- */
+        case 9:
+            scanf("%s %s %d", arquivo_bin, arquivo_indice, &n);
+            func_atualizar(arquivo_bin, arquivo_indice, n);
             break;
 
         default:

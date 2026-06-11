@@ -8,7 +8,7 @@
 #   make clean → remove executável e arquivos .bin gerados
 
 all:
-	gcc -o programaTrab *.c
+	gcc -o programaTrab *.c -lm
 
 run:
 	./programaTrab

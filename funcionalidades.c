@@ -9,6 +9,7 @@
 #include "head.h"
 #include "registro.h"
 #include "csv.h"
+#include "indice.h"
 #include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -291,6 +292,16 @@ void func_select_where(const char *arquivo_bin, int n) {
             }
         }
 
+        /* codEstacao é o id (chave única): se for um dos critérios,
+           podemos parar a busca assim que o registro for encontrado */
+        int busca_por_id = 0;
+        for (int i = 0; i < m; i++) {
+            if (strcmp(campos[i], "codEstacao") == 0) {
+                busca_por_id = 1;
+                break;
+            }
+        }
+
         /* busca sequencial: posicionar logo após o cabeçalho */
         fseek(fp, TAM_CABECALHO, SEEK_SET);
 
@@ -319,6 +330,12 @@ void func_select_where(const char *arquivo_bin, int n) {
             }
 
             registro_free(&r);
+
+            /* busca por id: como codEstacao é único, para de percorrer
+               o arquivo assim que o registro é encontrado */
+            if (satisfaz && busca_por_id) {
+                break;
+            }
         }
 
         if (!encontrou) {
@@ -375,4 +392,540 @@ void func_select_rrn(const char *arquivo_bin, int rrn) {
 
     registro_free(&r);
     fclose(fp);
+}
+
+/* -----------------------------------------------------------------------
+ * Auxiliares de entrada compartilhadas pelas funcionalidades [6]..[9]
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Lê um par (campo, valor) da entrada seguindo a regra do projeto:
+ *  - nomeEstacao / nomeLinha  -> valor entre aspas duplas (ScanQuoteString)
+ *  - demais campos (inteiros) -> token simples; "NULO" vira "" (campo nulo)
+ */
+static void ler_par_campo_valor(char *campo, char *valor) {
+    scanf("%s", campo);
+    if (strcmp(campo, "nomeEstacao") == 0 || strcmp(campo, "nomeLinha") == 0) {
+        ScanQuoteString(valor);
+    } else {
+        scanf("%s", valor);
+        if (strcmp(valor, "NULO") == 0) valor[0] = '\0';
+    }
+}
+
+/* Lê um inteiro que pode vir como "NULO" (retorna -1 nesse caso). */
+static int ler_inteiro_ou_nulo(void) {
+    char tok[MAX_VALOR_CAMPO];
+    scanf("%s", tok);
+    if (strcmp(tok, "NULO") == 0) return -1;
+    return atoi(tok);
+}
+
+/*
+ * Verifica se o registro r (já lido e ativo) satisfaz TODOS os m critérios.
+ * Retorna 1 se satisfaz, 0 caso contrário.
+ */
+static int satisfaz_criterios(const Registro *r, int m,
+                              char campos[][MAX_NOME_CAMPO],
+                              char valores[][MAX_VALOR_CAMPO]) {
+    for (int i = 0; i < m; i++) {
+        if (!registro_match(r, campos[i], valores[i])) return 0;
+    }
+    return 1;
+}
+
+/*
+ * Procura, no critério de busca, o valor de codEstacao (chave do índice).
+ * Retorna 1 e preenche *cod se codEstacao estiver entre os critérios;
+ * retorna 0 caso contrário (a busca deverá ser sequencial).
+ */
+static int criterio_tem_codEstacao(int m, char campos[][MAX_NOME_CAMPO],
+                                    char valores[][MAX_VALOR_CAMPO], int *cod) {
+    for (int i = 0; i < m; i++) {
+        if (strcmp(campos[i], "codEstacao") == 0 && valores[i][0] != '\0') {
+            *cod = atoi(valores[i]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Coleta os RRNs dos registros ativos que satisfazem os m critérios.
+ * Usa o índice (busca binária) quando codEstacao é um dos critérios;
+ * caso contrário faz varredura sequencial no arquivo de dados.
+ * Retorna a quantidade de RRNs coletados em rrns_out (vetor já alocado).
+ */
+static int coletar_rrns(FILE *fp, const Indice *idx,
+                        int m, char campos[][MAX_NOME_CAMPO],
+                        char valores[][MAX_VALOR_CAMPO], int *rrns_out) {
+    int total = 0;
+    int cod;
+
+    if (criterio_tem_codEstacao(m, campos, valores, &cod)) {
+        /* busca indexada: no máximo um registro (codEstacao é único) */
+        int rrn = indice_buscar(idx, cod);
+        if (rrn >= 0) {
+            Registro r;
+            fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+            if (registro_ler_bin(fp, &r) == REG_OK && r.removido == '0' &&
+                satisfaz_criterios(&r, m, campos, valores)) {
+                rrns_out[total++] = rrn;
+            }
+            registro_free(&r);
+        }
+    } else {
+        /* busca sequencial */
+        fseek(fp, TAM_CABECALHO, SEEK_SET);
+        Registro r;
+        int rrn = 0;
+        while (registro_ler_bin(fp, &r) == REG_OK) {
+            if (r.removido == '0' && satisfaz_criterios(&r, m, campos, valores)) {
+                rrns_out[total++] = rrn;
+            }
+            registro_free(&r);
+            rrn++;
+        }
+    }
+    return total;
+}
+
+/*
+ * Reconta o número de estações distintas (por nomeEstacao) entre os
+ * registros ativos do arquivo. Usado para manter nroEstacoes coerente
+ * após remoções/inserções/atualizações.
+ */
+static int recontar_nro_estacoes(FILE *fp) {
+    ListaNomes nomes = lista_nomes_criar();
+    fseek(fp, TAM_CABECALHO, SEEK_SET);
+    Registro r;
+    while (registro_ler_bin(fp, &r) == REG_OK) {
+        if (r.removido == '0' && r.nomeEstacao != NULL &&
+            !lista_nomes_contem(&nomes, r.nomeEstacao)) {
+            lista_nomes_inserir(&nomes, r.nomeEstacao);
+        }
+        registro_free(&r);
+    }
+    int total = nomes.count;
+    lista_nomes_destruir(&nomes);
+    return total;
+}
+
+/* -----------------------------------------------------------------------
+ * Funcionalidade [5] - Criar arquivo de índice primário a partir dos dados
+ * ----------------------------------------------------------------------- */
+
+void func_criar_indice(const char *arquivo_bin, const char *arquivo_indice) {
+    FILE *fp = fopen(arquivo_bin, "rb");
+    if (fp == NULL) {
+        printf("Falha no processamento do arquivo.\n");
+        return;
+    }
+
+    Head head;
+    if (head_ler(fp, &head) != HEAD_OK || head.status == STATUS_INCONSISTENTE) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    Indice idx;
+    indice_start(&idx);
+
+    /* percorrer os registros sequencialmente; o RRN é a ordem de leitura */
+    fseek(fp, TAM_CABECALHO, SEEK_SET);
+    Registro r;
+    RegistroStatus st;
+    int rrn = 0;
+    while ((st = registro_ler_bin(fp, &r)) == REG_OK) {
+        if (r.removido == '0') {
+            /* indice_inserir mantém a ordem crescente por codEstacao */
+            indice_inserir(&idx, r.codEstacao, rrn);
+        }
+        registro_free(&r);
+        rrn++;
+    }
+    fclose(fp);
+
+    if (st == REG_ERRO) {
+        printf("Falha no processamento do arquivo.\n");
+        indice_free(&idx);
+        return;
+    }
+
+    if (indice_salvar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        indice_free(&idx);
+        return;
+    }
+    indice_free(&idx);
+
+    /* exibir o índice gerado (obrigatório conforme especificação) */
+    BinarioNaTela((char *)arquivo_indice);
+}
+
+/* -----------------------------------------------------------------------
+ * Funcionalidade [6] - SELECT WHERE com índice (busca indexada/sequencial)
+ * ----------------------------------------------------------------------- */
+
+void func_select_where_indexado(const char *arquivo_bin,
+                                const char *arquivo_indice, int n) {
+    FILE *fp = fopen(arquivo_bin, "rb");
+    if (fp == NULL) {
+        printf("Falha no processamento do arquivo.\n");
+        return;
+    }
+
+    Head head;
+    if (head_ler(fp, &head) != HEAD_OK || head.status == STATUS_INCONSISTENTE) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    Indice idx;
+    indice_start(&idx);
+    if (indice_carregar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    char campos[MAX_CRITERIOS][MAX_NOME_CAMPO];
+    char valores[MAX_CRITERIOS][MAX_VALOR_CAMPO];
+
+    for (int q = 0; q < n; q++) {
+        if (q > 0) printf("\n");
+
+        int m;
+        scanf("%d", &m);
+        for (int i = 0; i < m; i++) ler_par_campo_valor(campos[i], valores[i]);
+
+        int cod;
+        int encontrou = 0;
+
+        if (criterio_tem_codEstacao(m, campos, valores, &cod)) {
+            /* busca indexada via busca binária no índice em RAM */
+            int rrn = indice_buscar(&idx, cod);
+            if (rrn >= 0) {
+                Registro r;
+                fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+                if (registro_ler_bin(fp, &r) == REG_OK && r.removido == '0' &&
+                    satisfaz_criterios(&r, m, campos, valores)) {
+                    registro_imprimir(&r);
+                    encontrou = 1;
+                }
+                registro_free(&r);
+            }
+        } else {
+            /* busca sequencial no arquivo de dados */
+            fseek(fp, TAM_CABECALHO, SEEK_SET);
+            Registro r;
+            while (registro_ler_bin(fp, &r) == REG_OK) {
+                if (r.removido == '0' &&
+                    satisfaz_criterios(&r, m, campos, valores)) {
+                    registro_imprimir(&r);
+                    encontrou = 1;
+                }
+                registro_free(&r);
+            }
+        }
+
+        if (!encontrou) printf("Registro inexistente.\n");
+    }
+
+    indice_free(&idx);
+    fclose(fp);
+}
+
+/* -----------------------------------------------------------------------
+ * Funcionalidade [7] - DELETE: remoção lógica + atualização do índice
+ * ----------------------------------------------------------------------- */
+
+void func_remover(const char *arquivo_bin, const char *arquivo_indice, int n) {
+    FILE *fp = fopen(arquivo_bin, "r+b");
+    if (fp == NULL) {
+        printf("Falha no processamento do arquivo.\n");
+        return;
+    }
+
+    Head head;
+    if (head_ler(fp, &head) != HEAD_OK || head.status == STATUS_INCONSISTENTE) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    Indice idx;
+    indice_start(&idx);
+    if (indice_carregar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    /* marcar arquivo como inconsistente durante a escrita */
+    head.status = STATUS_INCONSISTENTE;
+    head_escrever(fp, &head);
+
+    char campos[MAX_CRITERIOS][MAX_NOME_CAMPO];
+    char valores[MAX_CRITERIOS][MAX_VALOR_CAMPO];
+    int *rrns = (int *)malloc((head.proxRRN > 0 ? head.proxRRN : 1) * sizeof(int));
+    int total_removidos = 0;
+
+    for (int q = 0; q < n; q++) {
+        int m;
+        scanf("%d", &m);
+        for (int i = 0; i < m; i++) ler_par_campo_valor(campos[i], valores[i]);
+
+        int qtd = coletar_rrns(fp, &idx, m, campos, valores, rrns);
+        total_removidos += qtd;
+
+        /* remover cada registro coletado */
+        for (int k = 0; k < qtd; k++) {
+            int rrn = rrns[k];
+
+            /* ler o registro para obter o codEstacao (remoção no índice) */
+            Registro r;
+            fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+            if (registro_ler_bin(fp, &r) != REG_OK) { registro_free(&r); continue; }
+            int cod = r.codEstacao;
+            registro_free(&r);
+
+            /* remoção lógica: sobrescreve apenas removido(1 byte)='1' e
+               proximo(4 bytes), encadeando o RRN na pilha de removidos */
+            char removido = '1';
+            int  proximo  = head.topo;
+            fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+            fwrite(&removido, 1, 1, fp);
+            fwrite(&proximo,  4, 1, fp);
+            head.topo = rrn;
+
+            /* remover a entrada do índice primário */
+            indice_remover(&idx, cod);
+        }
+    }
+
+    free(rrns);
+
+    /* atualizar contadores: nroEstacoes recontado (estações distintas ativas);
+       nroParesEstacao reduzido em 1 por registro removido */
+    head.nroEstacoes      = recontar_nro_estacoes(fp);
+    head.nroParesEstacao -= total_removidos;
+
+    /* finalizar: cabeçalho consistente e persistir índice */
+    head.status = STATUS_CONSISTENTE;
+    head_escrever(fp, &head);
+    fclose(fp);
+
+    BinarioNaTela((char *)arquivo_bin);
+
+    if (indice_salvar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        indice_free(&idx);
+        return;
+    }
+    indice_free(&idx);
+
+    BinarioNaTela((char *)arquivo_indice);
+}
+
+/* -----------------------------------------------------------------------
+ * Funcionalidade [8] - INSERT: inserção com reaproveitamento da pilha
+ * ----------------------------------------------------------------------- */
+
+void func_inserir(const char *arquivo_bin, const char *arquivo_indice, int n) {
+    FILE *fp = fopen(arquivo_bin, "r+b");
+    if (fp == NULL) {
+        printf("Falha no processamento do arquivo.\n");
+        return;
+    }
+
+    Head head;
+    if (head_ler(fp, &head) != HEAD_OK || head.status == STATUS_INCONSISTENTE) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    Indice idx;
+    indice_start(&idx);
+    if (indice_carregar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    head.status = STATUS_INCONSISTENTE;
+    head_escrever(fp, &head);
+
+    char buffer[MAX_VALOR_CAMPO];
+
+    for (int q = 0; q < n; q++) {
+        /* ler os 8 campos posicionais do novo registro */
+        Registro novo = registro_start();
+        novo.removido = '0';
+        novo.proximo  = -1;
+
+        novo.codEstacao = ler_inteiro_ou_nulo();          /* codEstacao */
+
+        ScanQuoteString(buffer);                           /* nomeEstacao */
+        registro_set_str(&novo, REG_CAMPO_NOME_ESTACAO, buffer);
+
+        novo.codLinha = ler_inteiro_ou_nulo();             /* codLinha */
+
+        ScanQuoteString(buffer);                           /* nomeLinha */
+        registro_set_str(&novo, REG_CAMPO_NOME_LINHA, buffer);
+
+        novo.codProxEstacao  = ler_inteiro_ou_nulo();      /* codProxEstacao */
+        novo.distProxEstacao = ler_inteiro_ou_nulo();      /* distProxEstacao */
+        novo.codLinhaIntegra = ler_inteiro_ou_nulo();      /* codLinhaIntegra */
+        novo.codEstIntegra   = ler_inteiro_ou_nulo();      /* codEstIntegra */
+
+        /* escolher o RRN: reaproveitar da pilha de removidos ou inserir no fim */
+        int rrn;
+        if (head.topo != -1) {
+            rrn = head.topo;
+            /* recuperar o 'proximo' do registro removido para desempilhar */
+            Registro rem;
+            fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+            registro_ler_bin(fp, &rem);
+            head.topo = rem.proximo;
+            registro_free(&rem);
+        } else {
+            rrn = head.proxRRN;
+            head.proxRRN++;
+        }
+
+        /* gravar o novo registro na posição escolhida */
+        fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+        registro_escrever_bin(fp, &novo);
+
+        /* inserir no índice primário mantendo a ordem por codEstacao */
+        indice_inserir(&idx, novo.codEstacao, rrn);
+
+        registro_free(&novo);
+    }
+
+    /* atualizar contadores: nroEstacoes recontado; nroParesEstacao
+       acrescido em 1 por registro inserido (simétrico à remoção) */
+    head.nroEstacoes      = recontar_nro_estacoes(fp);
+    head.nroParesEstacao += n;
+
+    head.status = STATUS_CONSISTENTE;
+    head_escrever(fp, &head);
+    fclose(fp);
+
+    BinarioNaTela((char *)arquivo_bin);
+
+    if (indice_salvar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        indice_free(&idx);
+        return;
+    }
+    indice_free(&idx);
+
+    BinarioNaTela((char *)arquivo_indice);
+}
+
+/* -----------------------------------------------------------------------
+ * Funcionalidade [9] - UPDATE: atualização in-place + manutenção do índice
+ * ----------------------------------------------------------------------- */
+
+void func_atualizar(const char *arquivo_bin, const char *arquivo_indice, int n) {
+    FILE *fp = fopen(arquivo_bin, "r+b");
+    if (fp == NULL) {
+        printf("Falha no processamento do arquivo.\n");
+        return;
+    }
+
+    Head head;
+    if (head_ler(fp, &head) != HEAD_OK || head.status == STATUS_INCONSISTENTE) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    Indice idx;
+    indice_start(&idx);
+    if (indice_carregar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        fclose(fp);
+        return;
+    }
+
+    head.status = STATUS_INCONSISTENTE;
+    head_escrever(fp, &head);
+
+    /* critérios de busca (WHERE) */
+    char campos[MAX_CRITERIOS][MAX_NOME_CAMPO];
+    char valores[MAX_CRITERIOS][MAX_VALOR_CAMPO];
+    /* campos a atualizar (SET) */
+    char setCampos[MAX_CRITERIOS][MAX_NOME_CAMPO];
+    char setValores[MAX_CRITERIOS][MAX_VALOR_CAMPO];
+
+    int *rrns = (int *)malloc((head.proxRRN > 0 ? head.proxRRN : 1) * sizeof(int));
+
+    for (int q = 0; q < n; q++) {
+        /* ler critério de busca: mB pares (campo, valor) */
+        int mB;
+        scanf("%d", &mB);
+        for (int i = 0; i < mB; i++) ler_par_campo_valor(campos[i], valores[i]);
+
+        /* ler atualização: mA pares (campo, valor) */
+        int mA;
+        scanf("%d", &mA);
+        for (int i = 0; i < mA; i++) ler_par_campo_valor(setCampos[i], setValores[i]);
+
+        int qtd = coletar_rrns(fp, &idx, mB, campos, valores, rrns);
+
+        for (int k = 0; k < qtd; k++) {
+            int rrn = rrns[k];
+
+            /* ler o registro a atualizar */
+            Registro r;
+            fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+            if (registro_ler_bin(fp, &r) != REG_OK) { registro_free(&r); continue; }
+
+            int cod_antigo = r.codEstacao;
+
+            /* aplicar cada campo do SET */
+            for (int i = 0; i < mA; i++) {
+                registro_set_por_nome(&r, setCampos[i], setValores[i]);
+            }
+
+            /* regravar in-place (registro continua com 80 bytes fixos) */
+            fseek(fp, registro_rrn_offset(rrn), SEEK_SET);
+            registro_escrever_bin(fp, &r);
+
+            /* se o codEstacao mudou, atualizar a chave no índice (mesmo RRN) */
+            if (r.codEstacao != cod_antigo) {
+                indice_remover(&idx, cod_antigo);
+                indice_inserir(&idx, r.codEstacao, rrn);
+            }
+
+            registro_free(&r);
+        }
+    }
+
+    free(rrns);
+
+    /* atualizar nroEstacoes (atualizações podem alterar nomeEstacao);
+       o número de registros não muda, então nroParesEstacao é mantido */
+    head.nroEstacoes = recontar_nro_estacoes(fp);
+
+    head.status = STATUS_CONSISTENTE;
+    head_escrever(fp, &head);
+    fclose(fp);
+
+    BinarioNaTela((char *)arquivo_bin);
+
+    if (indice_salvar(&idx, arquivo_indice) != INDICE_OK) {
+        printf("Falha no processamento do arquivo.\n");
+        indice_free(&idx);
+        return;
+    }
+    indice_free(&idx);
+
+    BinarioNaTela((char *)arquivo_indice);
 }

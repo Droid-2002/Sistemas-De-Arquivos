@@ -74,4 +74,12 @@ RegistroStatus registro_set_str(Registro *r, RegistroCampo campo, const char *va
 /* retorna 1 se o registro bate com o criterio (campo, valor) */
 int registro_match(const Registro *r, const char *campo, const char *valor);
 
+/*
+ * define o valor de um campo a partir do seu nome (string) e do valor (string).
+ * valor "" indica NULO (inteiros viram -1, strings viram NULL).
+ * usado pela clausula SET da funcionalidade [9].
+ * retorna REG_OK se o campo foi reconhecido e setado, REG_ERRO caso contrario.
+ */
+RegistroStatus registro_set_por_nome(Registro *r, const char *campo, const char *valor);
+
 #endif /* REGISTRO_H */
